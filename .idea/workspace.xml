@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="05724695-3d18-49c9-a68a-1407363c8350" name="Changes" comment="">
+    <list default="true" id="05724695-3d18-49c9-a68a-1407363c8350" name="Changes" comment="added charm and bubbletea to send a dummy mail for nwo">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/go.mod" beforeDir="false" afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/go.sum" beforeDir="false" afterPath="$PROJECT_DIR$/go.sum" afterDir="false" />
@@ -40,6 +40,9 @@
     "accountId": "978466ca-1190-4215-a801-ef0a654296e3"
   }
 }]]></component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$USER_HOME$/go/pkg/mod/github.com/charmbracelet/bubbles@v0.20.0/filepicker/filepicker.go" root0="SKIP_INSPECTION" />
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -171,6 +174,10 @@
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="added charm and bubbletea to send a dummy mail for nwo" />
+    <option name="LAST_COMMIT_MESSAGE" value="added charm and bubbletea to send a dummy mail for nwo" />
   </component>
   <component name="VgoProject">
     <settings-migrated>true</settings-migrated>
