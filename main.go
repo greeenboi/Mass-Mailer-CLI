@@ -1,143 +1,289 @@
 package main
 
 import (
-    "bufio"
-    "bytes"
-    "encoding/csv"
-    "fmt"
-    "gopkg.in/gomail.v2"
-    "html/template"
-    "os"
-    "strings"
-    "time"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
-    tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-var senderEmail string
-var csvFilePath string
-var confirm string
-var subject string
-var htmlTemplatePath string
-var emails []string
+const (
+	fileSelectionView = iota
+	subjectInputView
+	confirmationView
+	progressView
+	padding  = 2
+	maxWidth = 80
+)
 
-func sendGoMail(subject string, templatePath string, toEmails []string) {
-    println("sending mail...")
-    // Get html
-    var body bytes.Buffer
-    t, err := template.ParseFiles(templatePath)
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
-    t.Execute(&body, nil)
+var (
+	titleStyle = lipgloss.NewStyle().MarginLeft(2).Foreground(lipgloss.Color("205"))
+	itemStyle  = lipgloss.NewStyle().PaddingLeft(4)
+	helpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
+)
 
-    //send with go mail
-    m := gomail.NewMessage()
-    m.SetHeader("From", "vinayakcsurya@gmail.com")
-    m.SetHeader("To", toEmails...)
-    //m.SetAddressHeader("Cc", "dan@example.com", "Dan")
-    m.SetHeader("Subject", subject)
-    m.SetBody("text/html", body.String())
-    m.Attach("img.png")
+type tickMsg time.Time
 
-    d := gomail.NewDialer("smtp.gmail.com", 587, "vinayakcsurya@gmail.com", "lblvwntpckhbbjds")
-
-    // Send the email to Bob, Cora and Dan.
-    if err := d.DialAndSend(m); err != nil {
-        panic(err)
-    }
-    println("mail sent!")
+type model struct {
+	csvFilepicker  filepicker.Model
+	htmlFilepicker filepicker.Model
+	textInput      textinput.Model
+	progress       progress.Model
+	currentView    int
+	csvFilePath    string
+	htmlFilePath   string
+	subject        string
+	confirmed      bool
+	quitting       bool
+	err            error
+	cursor         int
+	startTime      time.Time
 }
 
-func CliPrompt() {
-    reader := bufio.NewReader(os.Stdin)
+func initialModel() model {
+	csvFp := filepicker.New()
+	csvFp.AllowedTypes = []string{".csv"}
+	csvFp.CurrentDirectory, _ = os.UserHomeDir()
 
-    asciiText2 := `
- /$$$$$$$$                                  /$$                                      /$$$$$$  /$$           /$$      
-| $$_____/                                 | $$                                     /$$__  $$| $$          | $$      
-| $$     /$$$$$$  /$$   /$$ /$$$$$$$   /$$$$$$$  /$$$$$$   /$$$$$$   /$$$$$$$      | $$  \__/| $$ /$$   /$$| $$$$$$$ 
-| $$$$$ /$$__  $$| $$  | $$| $$__  $$ /$$__  $$ /$$__  $$ /$$__  $$ /$$_____/      | $$      | $$| $$  | $$| $$__  $$
-| $$__/| $$  \ $$| $$  | $$| $$  \ $$| $$  | $$| $$$$$$$$| $$  \__/|  $$$$$$       | $$      | $$| $$  | $$| $$  \ $$
-| $$   | $$  | $$| $$  | $$| $$  | $$| $$  | $$| $$_____/| $$       \____  $$      | $$    $$| $$| $$  | $$| $$  | $$
-| $$   |  $$$$$$/|  $$$$$$/| $$  | $$|  $$$$$$$|  $$$$$$$| $$       /$$$$$$$/      |  $$$$$$/| $$|  $$$$$$/| $$$$$$$/
-|__/    \______/  \______/ |__/  |__/ \_______/ \_______/|__/      |_______/        \______/ |__/ \______/ |_______/ 
-                                                                                                                     
-`
+	htmlFp := filepicker.New()
+	htmlFp.AllowedTypes = []string{".html"}
+	htmlFp.CurrentDirectory, _ = os.UserHomeDir()
 
-    fmt.Println(asciiText2)
-    fmt.Printf("Welcome to mass mailer of Founders Club!")
-    fmt.Println()
+	ti := textinput.New()
+	ti.Placeholder = "Enter email subject"
+	ti.Focus()
 
-    //fmt.Print("Enter Senders email address: ")
-    //fmt.Scanln(&senderEmail)
-
-    fmt.Print("Path to csv file: ")
-    csvFilePath, _ = reader.ReadString('\n')
-    csvFilePath = strings.TrimSpace(csvFilePath)
-
-    fmt.Print("Path to html template: ")
-    htmlTemplatePath, _ = reader.ReadString('\n')
-    htmlTemplatePath = strings.TrimSpace(htmlTemplatePath)
-
-    fmt.Print("Subject: ")
-    subject, _ = reader.ReadString('\n')
-    subject = strings.TrimSpace(subject)
-
-    fmt.Print("Confirm? [y/n]: ")
-    confirm, _ = reader.ReadString('\n')
-    confirm = strings.TrimSpace(confirm)
-
-    if confirm == "y" {
-        ReadCSV(csvFilePath)
-        time.Sleep(1 * time.Second)
-        sendGoMail(subject, htmlTemplatePath, emails)
-    } else {
-        fmt.Printf("%s", confirm)
-        println("terminated!")
-        os.Exit(0)
-    }
+	return model{
+		csvFilepicker:  csvFp,
+		htmlFilepicker: htmlFp,
+		textInput:      ti,
+		progress:       progress.New(progress.WithDefaultGradient()),
+		currentView:    fileSelectionView,
+	}
 }
 
-func ReadCSV(csvFilePath string) {
-    println("reading CSV file...")
-    // Open the CSV file
-    file, err := os.Open(csvFilePath)
-    if err != nil {
-        fmt.Println("Error:", err)
-        return
-    }
-    defer file.Close()
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.csvFilepicker.Init(), m.htmlFilepicker.Init(), textinput.Blink)
+}
 
-    reader := csv.NewReader(file)
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			m.quitting = true
+			return m, tea.Quit
+		}
+	}
 
-    records, err := reader.ReadAll()
-    if err != nil {
-        fmt.Println("Error:", err)
-        return
-    }
+	switch m.currentView {
+	case fileSelectionView:
+		return updateFileSelection(msg, m)
+	case subjectInputView:
+		return updateSubjectInput(msg, m)
+	case confirmationView:
+		return updateConfirmation(msg, m)
+	case progressView:
+		return updateProgress(msg, m)
+	}
 
-    for i, record := range records {
-        fmt.Printf("Record %d: %v\n", i+1, record)
+	return m, nil
+}
 
-        // Assuming the emails in each row are separated by commas
-        for _, field := range record {
-            // Split the emails in the field by commas
-            splitEmails := strings.Split(field, ",")
-            // Append each email to the emails slice
-            emails = append(emails, splitEmails...)
-        }
-    }
+func updateProgress(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.progress.Width = msg.Width - padding*2 - 4
+		if m.progress.Width > maxWidth {
+			m.progress.Width = maxWidth
+		}
+		return m, nil
 
-    fmt.Println("Emails:", emails)
+	case tickMsg:
+		if m.startTime.IsZero() {
+			m.startTime = time.Now()
+		}
+		elapsed := time.Since(m.startTime)
+		if elapsed >= 5*time.Second {
+			return m, tea.Quit
+		}
+		progress := float64(elapsed) / (5 * float64(time.Second))
+		cmd := m.progress.SetPercent(progress)
+		return m, tea.Batch(tickCmd(), cmd)
+
+	case progress.FrameMsg:
+		progressModel, cmd := m.progress.Update(msg)
+		m.progress = progressModel.(progress.Model)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func updateFileSelection(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "tab":
+			if m.csvFilePath == "" {
+				m.csvFilepicker, cmd = m.csvFilepicker.Update(msg)
+			} else {
+				m.htmlFilepicker, cmd = m.htmlFilepicker.Update(msg)
+			}
+		case "enter":
+			if m.csvFilePath == "" {
+				if selected, path := m.csvFilepicker.DidSelectFile(msg); selected {
+					m.csvFilePath = path
+					m.htmlFilepicker.CurrentDirectory = m.csvFilepicker.CurrentDirectory
+				}
+			} else {
+				if selected, path := m.htmlFilepicker.DidSelectFile(msg); selected {
+					m.htmlFilePath = path
+					m.currentView = subjectInputView
+					return m, textinput.Blink
+				}
+			}
+		}
+	}
+
+	var csvCmd, htmlCmd tea.Cmd
+	m.csvFilepicker, csvCmd = m.csvFilepicker.Update(msg)
+	m.htmlFilepicker, htmlCmd = m.htmlFilepicker.Update(msg)
+
+	return m, tea.Batch(cmd, csvCmd, htmlCmd)
+}
+
+func updateSubjectInput(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.subject = m.textInput.Value()
+			m.currentView = confirmationView
+		}
+	}
+
+	return m, cmd
+}
+
+func updateConfirmation(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "down", "j":
+			m.cursor++
+			if m.cursor > 1 {
+				m.cursor = 0
+			}
+		case "up", "k":
+			m.cursor--
+			if m.cursor < 0 {
+				m.cursor = 1
+			}
+		case "enter":
+			m.confirmed = m.cursor == 0
+			if m.confirmed {
+				m.currentView = progressView
+				return m, tickCmd()
+			}
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+func (m model) View() string {
+	if m.quitting {
+		return "Goodbye!\n"
+	}
+
+	var s strings.Builder
+
+	switch m.currentView {
+	case fileSelectionView:
+		s.WriteString(titleStyle.Render("File Selection"))
+		s.WriteString("\n\n")
+		if m.csvFilePath == "" {
+			s.WriteString(itemStyle.Render("Select CSV file:"))
+			s.WriteString("\n")
+			s.WriteString(m.csvFilepicker.View())
+		} else {
+			s.WriteString(itemStyle.Render(fmt.Sprintf("CSV file: %s", m.csvFilePath)))
+			s.WriteString("\n\n")
+			s.WriteString(itemStyle.Render("Select HTML file:"))
+			s.WriteString("\n")
+			s.WriteString(m.htmlFilepicker.View())
+		}
+	case subjectInputView:
+		s.WriteString(titleStyle.Render("Email Subject"))
+		s.WriteString("\n\n")
+		s.WriteString(itemStyle.Render("Enter the email subject:"))
+		s.WriteString("\n")
+		s.WriteString(m.textInput.View())
+	case confirmationView:
+		s.WriteString(titleStyle.Render("Confirmation"))
+		s.WriteString("\n\n")
+		s.WriteString(itemStyle.Render(fmt.Sprintf("CSV file: %s", m.csvFilePath)))
+		s.WriteString("\n")
+		s.WriteString(itemStyle.Render(fmt.Sprintf("HTML file: %s", m.htmlFilePath)))
+		s.WriteString("\n")
+		s.WriteString(itemStyle.Render(fmt.Sprintf("Subject: %s", m.subject)))
+		s.WriteString("\n\n")
+		s.WriteString(itemStyle.Render("Send emails?"))
+		s.WriteString("\n")
+		for i, choice := range []string{"Yes", "No"} {
+			if m.cursor == i {
+				s.WriteString(itemStyle.Render(fmt.Sprintf("(•) %s", choice)))
+			} else {
+				s.WriteString(itemStyle.Render(fmt.Sprintf("( ) %s", choice)))
+			}
+			s.WriteString("\n")
+		}
+	case progressView:
+		pad := strings.Repeat(" ", padding)
+		s.WriteString("\n" + pad + m.progress.View() + "\n\n" + pad + helpStyle("Sending emails..."))
+	}
+
+	if m.currentView != progressView {
+		s.WriteString("\n")
+		s.WriteString(itemStyle.Render("(q to quit)"))
+	}
+	s.WriteString("\n")
+
+	return s.String()
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }
 
 func main() {
-    //subject := "This is a html subject"
-    //templatePath := "/Users/vinayak/IdeaProjects/GO-projects/mailer/template.html"
-    //csv := "/Users/vinayak/IdeaProjects/GO-projects/mailer/emails.csv"
-    //emails := []string{"vinayak.chandra.suryavanshi@gmail.com", "vs9419@srmist.edu.in"}
-    //sendGoMail("This is a subject", "/Users/vinayak/IdeaProjects/GO-projects/mailer/template.html", emails)
-    CliPrompt()
+	p := tea.NewProgram(initialModel())
+	m, err := p.Run()
+	if err != nil {
+		fmt.Printf("Error: %v", err)
+		os.Exit(1)
+	}
 
+	finalModel := m.(model)
+	if finalModel.confirmed {
+		fmt.Printf("Emails sent using CSV file: %s, HTML template: %s, and subject: %s\n",
+			finalModel.csvFilePath, finalModel.htmlFilePath, finalModel.subject)
+	} else {
+		fmt.Println("Operation cancelled.")
+	}
 }
